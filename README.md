@@ -293,7 +293,7 @@ in the Software without restriction...
 
 ---
 
-## 2️⃣ main.py (نسخه‌ی جدید بدون اسم قبلی)
+## 2️⃣ main.py 
 
 
 ```python
@@ -304,7 +304,7 @@ import requests
 import webview
 
 # =========================
-# Core configuration
+# Core configuration Amir Mobasheraghdam
 # =========================
 
 # URL of the backend web application (Render, custom server, etc.)
@@ -573,7 +573,7 @@ ERROR_HTML = r"""
 
 
 # =========================
-# Backend waiting logic
+# Backend waiting logic Amir Mobasheraghdam
 # =========================
 
 def wait_and_load(window):
