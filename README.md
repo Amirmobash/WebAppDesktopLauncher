@@ -295,7 +295,6 @@ in the Software without restriction...
 
 ## 2️⃣ main.py (نسخه‌ی جدید بدون اسم قبلی)
 
-فایل `main.py` رو این‌طوری بذار:
 
 ```python
 import threading
@@ -626,13 +625,11 @@ if __name__ == "__main__":
     main()
 ````
 
-فقط **یادت نره `APP_URL` رو با آدرس واقعی backend خودت عوض کنی** (Render یا هرچی).
 
 ---
 
 ## 3️⃣ requirements.txt
 
-یه فایل `requirements.txt` بساز:
 
 ```text
 pywebview
@@ -644,7 +641,6 @@ requests
 
 ## 4️⃣ .gitignore
 
-برای تمیز بودن repo، `.gitignore` این‌طوری خوبه:
 
 ```gitignore
 # Python venv
