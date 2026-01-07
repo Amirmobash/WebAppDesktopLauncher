@@ -1,0 +1,634 @@
+# 📁 
+
+```text
+WebAppDesktopLauncher/
+├─ README.md
+├─ LICENSE
+├─ .gitignore
+└─ src/
+   └─ WebAppDesktopLauncher/
+      ├─ WebAppDesktopLauncher.csproj
+      ├─ appsettings.json
+      ├─ App.xaml
+      ├─ App.xaml.cs
+      ├─ MainWindow.xaml
+      ├─ MainWindow.xaml.cs
+      ├─ Assets/
+      │  ├─ loading.html
+      │  └─ error.html
+      └─ Properties/
+         └─ launchSettings.json
+```
+
+---
+
+# ✅ Amir Mobasheraghdam
+
+## 1) `README.md`
+
+````markdown
+# WebApp Desktop Launcher (Windows)
+
+Ein leichter **Windows-Desktop-Client** für eine bestehende Web-Anwendung.
+
+Statt den Browser zu öffnen und eine URL manuell aufzurufen, startet der Benutzer einfach eine einzige `.exe`.
+Die Anwendung zeigt zuerst einen modernen **deutschen Ladebildschirm**, wartet bis das Backend erreichbar ist
+(z. B. bei Render-Cold-Starts), und lädt anschließend die echte Web-UI in einem nativen Desktop-Fenster.
+
+Autor: Amir Mobasheraghdam
+
+---
+
+## Funktionen
+
+- 🖥️ Desktop-App-Feeling (ohne Browser-Chrome, ohne Adressleiste)
+- 🌐 Lädt jede bestehende Web-Anwendung per konfigurierbarer URL
+- ⏳ Deutscher Ladebildschirm während der Server startet
+- 🚨 Deutscher Fehlerbildschirm bei Timeout / Offline
+- ⚙️ Konfiguration über `appsettings.json`
+- 📦 Single-File EXE Build via `dotnet publish` (Self-Contained)
+
+---
+
+## Voraussetzungen (Entwicklung)
+
+- Visual Studio 2022 oder `dotnet` CLI
+- .NET 8 SDK
+- Windows 10/11
+- WebView2 Runtime (meist bereits durch Microsoft Edge vorhanden)
+
+---
+
+## Projekt starten (Entwicklung)
+
+Im Projektordner:
+
+```powershell
+cd .\src\WebAppDesktopLauncher\
+dotnet restore
+dotnet run
+````
+
+---
+
+## Konfiguration
+
+Datei: `src/WebAppDesktopLauncher/appsettings.json`
+
+Wichtige Felder:
+
+* `AppUrl` → URL deines Backends (Render, eigener Server, lokal usw.)
+* `MaxWaitSeconds` → maximale Wartezeit (z. B. 300 = 5 Minuten)
+* `PollSeconds` → Poll-Intervall
+* `WindowTitle`, `Width`, `Height` → Fenster-Einstellungen
+
+Beispiel:
+
+```json
+{
+  "AppUrl": "https://deine-app.example.com",
+  "MaxWaitSeconds": 300,
+  "PollSeconds": 4,
+  "RequestTimeoutSeconds": 5,
+  "WindowTitle": "WebApp Desktop Client",
+  "Width": 1200,
+  "Height": 800
+}
+```
+
+---
+
+## Build: Single-File EXE (Distribution)
+
+Ausführen im Projektordner `src/WebAppDesktopLauncher/`:
+
+```powershell
+dotnet publish -c Release -r win-x64 `
+  /p:PublishSingleFile=true `
+  /p:SelfContained=true `
+  /p:IncludeNativeLibrariesForSelfExtract=true
+```
+
+Ergebnis:
+
+```text
+src/WebAppDesktopLauncher/bin/Release/net8.0-windows/win-x64/publish/
+```
+
+Dort liegt die EXE.
+
+---
+
+## Troubleshooting
+
+### Es erscheint nur die Fehlerseite
+
+Prüfe:
+
+* Stimmt `AppUrl`?
+* Ist die URL im normalen Browser erreichbar?
+* Bei Render: Cold Start → `MaxWaitSeconds` erhöhen.
+
+### WebView2 Probleme
+
+In der Regel ist WebView2 Runtime bereits installiert.
+Falls nicht: Microsoft WebView2 Runtime installieren (über Microsoft/Edge).
+
+---
+
+## Lizenz
+
+Siehe `LICENSE`.
+
+````
+
+---
+
+## 2) `src/WebAppDesktopLauncher/WebAppDesktopLauncher.csproj`
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <AssemblyName>WebAppDesktopLauncher</AssemblyName>
+    <RootNamespace>WebAppDesktopLauncher</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Floating version: immer aktuellste 1.x -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- HTML-Dateien ins Output-Verzeichnis kopieren -->
+    <Content Include="Assets\loading.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\error.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+
+    <!-- appsettings.json ins Output-Verzeichnis kopieren -->
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
+````
+
+---
+
+## 3) `src/WebAppDesktopLauncher/appsettings.json`
+
+```json
+{
+  "AppUrl": "https://your-backend-or-render-app-url.example.com",
+  "MaxWaitSeconds": 300,
+  "PollSeconds": 4,
+  "RequestTimeoutSeconds": 5,
+
+  "WindowTitle": "WebApp Desktop Client",
+  "Width": 1200,
+  "Height": 800,
+  "MinWidth": 800,
+  "MinHeight": 600,
+
+  "DisableDevTools": true,
+  "DisableContextMenus": true,
+  "DisableStatusBar": true
+}
+```
+
+---
+
+## 4) `src/WebAppDesktopLauncher/App.xaml`
+
+```xml
+<Application x:Class="WebAppDesktopLauncher.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+    </Application.Resources>
+</Application>
+```
+
+---
+
+## 5) `src/WebAppDesktopLauncher/App.xaml.cs`
+
+```csharp
+using System.Windows;
+
+namespace WebAppDesktopLauncher
+{
+    public partial class App : Application
+    {
+    }
+}
+```
+
+---
+
+## 6) `src/WebAppDesktopLauncher/MainWindow.xaml`
+
+```xml
+<Window x:Class="WebAppDesktopLauncher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="WebApp Desktop Client"
+        Width="1200" Height="800"
+        MinWidth="800" MinHeight="600">
+    <Grid>
+        <wv2:WebView2 x:Name="Browser"/>
+    </Grid>
+</Window>
+```
+
+---
+
+## 7) `src/WebAppDesktopLauncher/MainWindow.xaml.cs`
+
+```csharp
+using Microsoft.Web.WebView2.Core;
+using System;
+using System.IO;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+
+namespace WebAppDesktopLauncher
+{
+    public partial class MainWindow : Window
+    {
+        private sealed class LauncherConfig
+        {
+            public string AppUrl { get; set; } = "https://example.com";
+            public int MaxWaitSeconds { get; set; } = 300;
+            public int PollSeconds { get; set; } = 4;
+            public int RequestTimeoutSeconds { get; set; } = 5;
+
+            public string WindowTitle { get; set; } = "WebApp Desktop Client";
+            public int Width { get; set; } = 1200;
+            public int Height { get; set; } = 800;
+            public int MinWidth { get; set; } = 800;
+            public int MinHeight { get; set; } = 600;
+
+            public bool DisableDevTools { get; set; } = true;
+            public bool DisableContextMenus { get; set; } = true;
+            public bool DisableStatusBar { get; set; } = true;
+        }
+
+        private LauncherConfig _cfg = new LauncherConfig();
+        private CancellationTokenSource? _cts;
+
+        private HttpClient _http = new HttpClient();
+
+        public MainWindow()
+        {
+            InitializeComponent();
+            Loaded += OnLoaded;
+            Closed += (_, __) => _cts?.Cancel();
+        }
+
+        private async void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            _cts = new CancellationTokenSource();
+
+            // Konfiguration laden
+            _cfg = LoadConfig();
+
+            Title = _cfg.WindowTitle;
+            Width = _cfg.Width;
+            Height = _cfg.Height;
+            MinWidth = _cfg.MinWidth;
+            MinHeight = _cfg.MinHeight;
+
+            _http.Timeout = TimeSpan.FromSeconds(Math.Max(1, _cfg.RequestTimeoutSeconds));
+
+            // WebView2 initialisieren
+            await Browser.EnsureCoreWebView2Async();
+
+            // Optional: mehr "native-like"
+            Browser.CoreWebView2.Settings.AreDevToolsEnabled = !_cfg.DisableDevTools;
+            Browser.CoreWebView2.Settings.AreDefaultContextMenusEnabled = !_cfg.DisableContextMenus;
+            Browser.CoreWebView2.Settings.IsStatusBarEnabled = !_cfg.DisableStatusBar;
+
+            // Ladebildschirm sofort anzeigen
+            Browser.NavigateToString(ReadAsset("loading.html"));
+
+            // Backend warten + laden (im Hintergrund)
+            _ = Task.Run(() => WaitAndLoadAsync(_cts.Token));
+        }
+
+        private LauncherConfig LoadConfig()
+        {
+            try
+            {
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var path = Path.Combine(baseDir, "appsettings.json");
+
+                if (!File.Exists(path))
+                    return new LauncherConfig();
+
+                var json = File.ReadAllText(path);
+                var cfg = JsonSerializer.Deserialize<LauncherConfig>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                return cfg ?? new LauncherConfig();
+            }
+            catch
+            {
+                // Wenn Konfig kaputt ist: Default nehmen
+                return new LauncherConfig();
+            }
+        }
+
+        private string ReadAsset(string fileName)
+        {
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var path = Path.Combine(baseDir, "Assets", fileName);
+
+            if (!File.Exists(path))
+            {
+                // Fallback: minimaler Text in Deutsch
+                return $"<html lang='de'><body style='font-family:system-ui;background:#020617;color:#e5e7eb;padding:24px;'>" +
+                       $"<h2>Datei fehlt</h2><p>Die Datei <b>{fileName}</b> wurde nicht gefunden.</p></body></html>";
+            }
+
+            return File.ReadAllText(path);
+        }
+
+        private async Task WaitAndLoadAsync(CancellationToken ct)
+        {
+            var start = DateTimeOffset.UtcNow;
+            var appUrl = _cfg.AppUrl;
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Get, appUrl);
+                    using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+
+                    // Wie in Python: alles außer 5xx gilt als "bereit"
+                    if ((int)resp.StatusCode < 500)
+                    {
+                        await Dispatcher.InvokeAsync(() => Browser.CoreWebView2.Navigate(appUrl));
+                        return;
+                    }
+                }
+                catch
+                {
+                    // Ignorieren: Server ist noch nicht bereit
+                }
+
+                if ((DateTimeOffset.UtcNow - start).TotalSeconds > _cfg.MaxWaitSeconds)
+                {
+                    await Dispatcher.InvokeAsync(() => Browser.NavigateToString(ReadAsset("error.html")));
+                    return;
+                }
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, _cfg.PollSeconds)), ct);
+                }
+                catch
+                {
+                    return;
+                }
+            }
+        }
+    }
+}
+```
+
+---
+
+## 8) `src/WebAppDesktopLauncher/Assets/loading.html`
+
+```html
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Anwendung wird gestartet…</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #1f2933 0, #020617 60%);
+      color: #e5e7eb; overflow: hidden;
+    }
+    .center { height: 100%; display: flex; align-items: center; justify-content: center; }
+    .card {
+      background: rgba(15, 23, 42, 0.92);
+      border-radius: 20px;
+      padding: 32px 40px;
+      box-shadow: 0 20px 40px rgba(0,0,0,.65), 0 0 0 1px rgba(148,163,184,.2);
+      max-width: 480px; width: 100%; position: relative; overflow: hidden;
+    }
+    .card::before {
+      content: ""; position: absolute; inset: -80px;
+      background:
+        radial-gradient(circle at top left, rgba(56,189,248,.18), transparent 55%),
+        radial-gradient(circle at bottom right, rgba(129,140,248,.18), transparent 55%);
+      opacity: .8; z-index: -1;
+    }
+    .logo-circle {
+      width: 48px; height: 48px; border-radius: 999px;
+      border: 2px solid rgba(148,163,184,.6);
+      display: inline-flex; align-items: center; justify-content: center;
+      margin-bottom: 16px; position: relative;
+    }
+    .logo-circle::after {
+      content: ""; position: absolute; inset: -6px;
+      border-radius: inherit; border: 1px solid rgba(56,189,248,.4);
+      opacity: .7;
+    }
+    .logo-circle span { font-weight: 700; font-size: 18px; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0 0 8px 0; font-size: 22px; letter-spacing: .03em; }
+    .subtitle { margin: 0 0 24px 0; font-size: 14px; color: #9ca3af; }
+    .loader {
+      width: 52px; height: 52px; border-radius: 999px;
+      border: 3px solid rgba(148,163,184,.35);
+      border-top-color: #38bdf8;
+      animation: spin .9s linear infinite; margin-bottom: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .status { font-size: 14px; margin-bottom: 4px; }
+    .hint { font-size: 12px; color: #9ca3af; }
+    .steps { margin-top: 18px; font-size: 12px; color: #9ca3af; list-style: none; padding: 0; }
+    .steps li { display: flex; align-items: center; margin-bottom: 6px; }
+    .steps li span { width: 6px; height: 6px; border-radius: 999px; background: rgba(148,163,184,.7); margin-right: 8px; }
+    .footer { margin-top: 18px; font-size: 11px; color: #6b7280; display: flex; justify-content: space-between; align-items: center; }
+    .pill { border-radius: 999px; border: 1px solid rgba(148,163,184,.7); padding: 3px 10px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+  </style>
+</head>
+<body>
+  <div class="center">
+    <div class="card">
+      <div class="logo-circle"><span>WA</span></div>
+      <h1>WebApp Desktop Client</h1>
+      <p class="subtitle">Die Anwendung wird vorbereitet. Einen kleinen Moment bitte.</p>
+
+      <div class="loader"></div>
+      <div class="status">Verbindung zum Server wird aufgebaut…</div>
+      <div class="hint">Bitte schließen Sie dieses Fenster nicht.</div>
+
+      <ul class="steps">
+        <li><span></span>Backend wird gestartet</li>
+        <li><span></span>Oberfläche wird geladen</li>
+        <li><span></span>Funktionen werden initialisiert</li>
+      </ul>
+
+      <div class="footer">
+        <div class="pill">Initialisierung</div>
+        <div>v1.0 · Online-Client</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+```
+
+---
+
+## 9) `src/WebAppDesktopLauncher/Assets/error.html`
+
+```html
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Keine Verbindung</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #020617; color: #e5e7eb;
+    }
+    .center { height: 100%; display: flex; align-items: center; justify-content: center; }
+    .box {
+      background: #020617;
+      border-radius: 18px;
+      padding: 28px 32px;
+      border: 1px solid rgba(248, 113, 113, 0.45);
+      box-shadow: 0 18px 35px rgba(0, 0, 0, 0.8);
+      max-width: 440px;
+    }
+    h1 { margin: 0 0 10px 0; font-size: 20px; }
+    p { margin: 0 0 8px 0; font-size: 14px; color: #d1d5db; }
+    ul { margin: 10px 0 0 18px; font-size: 13px; color: #9ca3af; }
+  </style>
+</head>
+<body>
+  <div class="center">
+    <div class="box">
+      <h1>Keine Verbindung zum Server</h1>
+      <p>Die Anwendung konnte innerhalb der erwarteten Zeit keine Verbindung herstellen.</p>
+      <p>Bitte prüfen Sie:</p>
+      <ul>
+        <li>Ihre Internetverbindung</li>
+        <li>Ob der Server-Dienst online ist</li>
+        <li>Ob die URL in der Konfiguration korrekt ist</li>
+      </ul>
+      <p>Starten Sie das Programm anschließend erneut.</p>
+    </div>
+  </div>
+</body>
+</html>
+```
+
+---
+
+## 10) `src/WebAppDesktopLauncher/Properties/launchSettings.json`
+
+```json
+{
+  "profiles": {
+    "WebAppDesktopLauncher": {
+      "commandName": "Project"
+    }
+  }
+}
+```
+
+---
+
+## 11) `.gitignore`
+
+```gitignore
+# Build outputs
+bin/
+obj/
+
+# VS
+.vs/
+*.user
+*.suo
+
+# Rider
+.idea/
+
+# Logs
+*.log
+
+# Publish output
+**/publish/
+```
+
+---
+
+## 12) `LICENSE` (MIT)
+
+```text
+MIT License
+
+Copyright (c) 2025 Amir Mobasheraghdam
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+```powershell
+cd .\WebAppDesktopLauncher\src\WebAppDesktopLauncher\
+dotnet restore
+dotnet run
+```
+
+3. EXE :
+
+```powershell
+dotnet publish -c Release -r win-x64 `
+  /p:PublishSingleFile=true `
+  /p:SelfContained=true `
+  /p:IncludeNativeLibrariesForSelfExtract=true
+```
