@@ -15,7 +15,7 @@ namespace WebAppDesktopLauncher
     {
         private sealed class LauncherConfig
         {
-            public string AppUrl { get; set; } = "https://example.com";
+            public string AppUrl { get; set; } = "https://aikiw.com";
             public int MaxWaitSeconds { get; set; } = 300;
             public int PollSeconds { get; set; } = 4;
             public int RequestTimeoutSeconds { get; set; } = 5;
@@ -405,3 +405,4 @@ namespace WebAppDesktopLauncher
         }
     }
 }
+
