@@ -75,11 +75,11 @@ namespace WebAppDesktopLauncher
             MinWidth = _cfg.MinWidth;
             MinHeight = _cfg.MinHeight;
 
-            // ✅ مهم: تا وقتی اپ آماده نشده، خود WebView رو هم مخفی کن که حتی لحظه‌ای لاگین دیده نشه
+            // تا وقتی اپ آماده نشده، WebView مخفی باشد
             Browser.Visibility = Visibility.Hidden;
             ShowOverlay("Bitte warten…");
 
-            // ✅ Proxy-aware HttpClient (برای شرکت‌ها)
+            // Proxy-aware HttpClient (برای شرکت‌ها)
             _http = CreateProxyAwareHttpClient(_cfg.RequestTimeoutSeconds);
 
             try
@@ -93,7 +93,7 @@ namespace WebAppDesktopLauncher
                 return;
             }
 
-            // ===== WebView2 Settings: native-like =====
+            // WebView2 Settings: native-like
             try
             {
                 var s = Browser.CoreWebView2.Settings;
@@ -107,15 +107,14 @@ namespace WebAppDesktopLauncher
             }
             catch { }
 
-            // Optional: Dark/Light (اگر SDK شما داشت)
+            // Optional: color scheme (اگر SDK پشتیبانی کند)
             try
             {
-                // بعضی نسخه‌ها PreferredColorScheme دارن
                 Browser.CoreWebView2.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Auto;
             }
             catch { }
 
-            // ===== Basic Auth auto answer (اگر گذاشتی) =====
+            // Basic Auth auto answer (اگر ست شد)
             Browser.CoreWebView2.BasicAuthenticationRequested += (_, eArgs) =>
             {
                 try
@@ -130,32 +129,37 @@ namespace WebAppDesktopLauncher
                 catch { }
             };
 
-            // ===== Downloads => Desktop =====
+            // Downloads => Desktop (سازگار با نسخه‌های قدیمی: بدون SuggestedFileName)
             Browser.CoreWebView2.DownloadStarting += (_, eArgs) =>
             {
                 try
                 {
                     var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
 
-                    var suggested = string.IsNullOrWhiteSpace(eArgs.SuggestedFileName)
-                        ? "download"
-                        : SanitizeFileName(eArgs.SuggestedFileName);
+                    // در بعضی نسخه‌ها SuggestedFileName وجود ندارد؛ از ResultFilePath پیش‌فرض نام را می‌گیریم
+                    var defaultPath = eArgs.ResultFilePath; // معمولاً ...\Downloads\file.ext
+                    var fileName = Path.GetFileName(defaultPath);
 
-                    var target = GetUniquePath(Path.Combine(desktop, suggested));
+                    if (string.IsNullOrWhiteSpace(fileName))
+                        fileName = "download";
+
+                    fileName = SanitizeFileName(fileName);
+
+                    var target = GetUniquePath(Path.Combine(desktop, fileName));
 
                     eArgs.ResultFilePath = target;
-                    eArgs.Handled = true; // no SaveAs dialog
+                    eArgs.Handled = true; // بدون دیالوگ Save As
 
                     Log("Download redirected to Desktop: " + target);
                 }
                 catch (Exception ex)
                 {
                     Log("DownloadStarting FAILED: " + ex.Message);
-                    eArgs.Handled = false; // fallback to default behavior
+                    eArgs.Handled = false; // fallback
                 }
             };
 
-            // ===== Overlay logic: هیچ وقت لاگین دیده نشه =====
+            // Overlay logic: لاگین دیده نشود
             Browser.CoreWebView2.NavigationStarting += (_, navArgs) =>
             {
                 try
@@ -167,7 +171,6 @@ namespace WebAppDesktopLauncher
                     }
                     else
                     {
-                        // اگر بعداً سشن پرید و رفت login، دوباره مخفی کن
                         if (IsLoginUrl(url))
                         {
                             Browser.Visibility = Visibility.Hidden;
@@ -184,12 +187,11 @@ namespace WebAppDesktopLauncher
                 {
                     Log($"NavigationCompleted: IsSuccess={navArgs.IsSuccess}, WebErrorStatus={navArgs.WebErrorStatus}, Url={Browser.Source}");
 
-                    // اگر رفت /login: سریع auto-login پشت پرده
+                    // اگر login بود، پشت پرده auto-login
                     await AutoLoginIfNeededAsync();
 
                     var url = Browser.Source?.ToString() ?? "";
 
-                    // وقتی از لاگین رد شدیم و وارد اپ شدیم:
                     if (navArgs.IsSuccess && !IsLoginUrl(url))
                     {
                         _appShown = true;
@@ -198,17 +200,13 @@ namespace WebAppDesktopLauncher
                     }
                     else
                     {
-                        // هنوز تو login/redirect/error هستیم
                         ShowOverlay(IsLoginUrl(url) ? "Anmeldung wird durchgeführt…" : "Bitte warten…");
                     }
                 }
                 catch { }
             };
 
-            // ✅ از اول overlay رو نشون میدیم؛ لازم نیست loading.html تو WebView نمایش بدی
-            // Browser.NavigateToString(ReadAsset("loading.html"));
-
-            // Backend wait/poll + load in background
+            // شروع فرآیند wait/poll
             _ = Task.Run(() => WaitAndLoadAsync(_cts.Token));
         }
 
@@ -256,8 +254,7 @@ namespace WebAppDesktopLauncher
                     consecutiveFailures++;
                     Log($"Poll FAILED (#{consecutiveFailures}): {ex.GetType().Name}: {ex.Message}");
 
-                    // ✅ خیلی مهم برای شرکت‌ها:
-                    // اگر HttpClient به خاطر Proxy/Auth fail شد ولی مرورگر باز می‌کنه،
+                    // اگر HttpClient به خاطر Proxy/Auth fail شد ولی مرورگر باز می‌کند،
                     // بعد از چند بار مستقیم با WebView2 navigate کن (پشت overlay).
                     if (!directNavigateFallbackTriggered && consecutiveFailures >= 3)
                     {
@@ -277,7 +274,6 @@ namespace WebAppDesktopLauncher
                     {
                         Log("Timeout reached. Showing error overlay.");
                         ShowOverlay("Zeitüberschreitung. Bitte prüfen Sie Internet/Proxy.");
-                        // اگر خواستی: Browser.NavigateToString(ReadAsset("error.html"));
                     });
                     return;
                 }
@@ -412,12 +408,7 @@ namespace WebAppDesktopLauncher
                 Timeout = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds))
             };
 
-            try
-            {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("WebAppDesktopLauncher/1.0");
-            }
-            catch { }
-
+            try { client.DefaultRequestHeaders.UserAgent.ParseAdd("WebAppDesktopLauncher/1.0"); } catch { }
             return client;
         }
 
@@ -425,6 +416,8 @@ namespace WebAppDesktopLauncher
         {
             if (string.IsNullOrWhiteSpace(url)) return false;
             url = url.ToLowerInvariant();
+
+            // اگر مسیر لاگین سایتت فرق دارد اینجا اضافه کن
             return url.Contains("/login") || url.Contains("/auth") || url.Contains("signin") || url.Contains("sign-in");
         }
 
@@ -439,10 +432,7 @@ namespace WebAppDesktopLauncher
 
         private void HideOverlay()
         {
-            Dispatcher.Invoke(() =>
-            {
-                BlockingOverlay.Visibility = Visibility.Collapsed;
-            });
+            Dispatcher.Invoke(() => BlockingOverlay.Visibility = Visibility.Collapsed);
         }
 
         private static string SanitizeFileName(string name)
