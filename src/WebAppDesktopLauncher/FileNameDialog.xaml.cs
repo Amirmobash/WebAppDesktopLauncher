@@ -4,11 +4,14 @@ namespace WebAppDesktopLauncher
 {
     public partial class FileNameDialog : Window
     {
+        // Enthält den vom Benutzer eingegebenen Dateinamen (ohne Pfad).
         public string FileNameResult { get; private set; } = "";
 
         public FileNameDialog(string suggestedName)
         {
             InitializeComponent();
+
+            // Vorschlag setzen und direkt markieren, damit der Benutzer schnell überschreiben kann.
             FileNameBox.Text = suggestedName ?? "";
             FileNameBox.SelectAll();
             FileNameBox.Focus();
@@ -16,14 +19,20 @@ namespace WebAppDesktopLauncher
 
         private void Save_Click(object sender, RoutedEventArgs e)
         {
-            FileNameResult = FileNameBox.Text?.Trim() ?? "";
-            if (string.IsNullOrWhiteSpace(FileNameResult))
+            var name = (FileNameBox.Text ?? "").Trim();
+
+            // Einfacher Check: Dateiname darf nicht leer sein.
+            if (string.IsNullOrWhiteSpace(name))
             {
-                MessageBox.Show(this, "File name cannot be empty.", "Error",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this,
+                    "Der Dateiname darf nicht leer sein.",
+                    "Fehler",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
                 return;
             }
 
+            FileNameResult = name;
             DialogResult = true;
             Close();
         }
