@@ -4,8 +4,49 @@
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="WebApp Desktop Client"
         Width="1200" Height="800"
-        MinWidth="800" MinHeight="600">
+        MinWidth="800" MinHeight="600"
+        WindowStartupLocation="CenterScreen">
+
     <Grid>
+        <!-- WebView -->
         <wv2:WebView2 x:Name="Browser"/>
+
+        <!-- Blocking overlay (کاربر فقط اینو می‌بینه تا اپ آماده شه) -->
+        <Border x:Name="BlockingOverlay"
+                Background="#F3F3F3"
+                Visibility="Visible"
+                Panel.ZIndex="999">
+            <Grid>
+                <Border Width="520"
+                        Padding="22"
+                        Background="White"
+                        BorderBrush="#D0D0D0"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                    <StackPanel>
+                        <TextBlock Text="Anwendung wird gestartet"
+                                   FontSize="18"
+                                   FontWeight="SemiBold"
+                                   Margin="0,0,0,6"/>
+
+                        <TextBlock x:Name="OverlayText"
+                                   Text="Bitte warten…"
+                                   Foreground="#666"
+                                   FontSize="12"
+                                   Margin="0,0,0,14"/>
+
+                        <ProgressBar Height="10"
+                                     IsIndeterminate="True"/>
+
+                        <TextBlock Text="Dieses Fenster bitte nicht schließen."
+                                   Foreground="#777"
+                                   FontSize="11"
+                                   Margin="0,12,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
     </Grid>
 </Window>
