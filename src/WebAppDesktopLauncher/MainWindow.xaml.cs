@@ -30,11 +30,13 @@ namespace WebAppDesktopLauncher
             public bool DisableContextMenus { get; set; } = true;
             public bool DisableStatusBar { get; set; } = true;
 
-            // Optional: HTTP Basic Auth
+            // Optional: HTTP Basic Auth (z. B. Passwortschutz)
+            // Hinweis: Besser NICHT hardcoden – in appsettings.json konfigurieren.
             public string BasicAuthUser { get; set; } = "";
             public string BasicAuthPassword { get; set; } = "";
 
-            // Optional: Form Login
+            // Optional: Formular-Login (z. B. /login)
+            // Hinweis: Besser NICHT hardcoden – in appsettings.json konfigurieren.
             public string AutoLoginUser { get; set; } = "";
             public string AutoLoginPassword { get; set; } = "";
         }
@@ -65,8 +67,9 @@ namespace WebAppDesktopLauncher
         {
             _cts = new CancellationTokenSource();
             _logFilePath = PrepareLogFile();
-            Log("=== Launcher started ===");
+            Log("=== Launcher gestartet ===");
 
+            // Konfiguration laden
             _cfg = LoadConfig();
 
             Title = _cfg.WindowTitle;
@@ -75,25 +78,26 @@ namespace WebAppDesktopLauncher
             MinWidth = _cfg.MinWidth;
             MinHeight = _cfg.MinHeight;
 
-            // تا وقتی اپ آماده نشده، WebView مخفی باشد
+            // Wichtig: WebView verstecken, damit der Benutzer die Login-Seite nie sieht.
             Browser.Visibility = Visibility.Hidden;
             ShowOverlay("Bitte warten…");
 
-            // Proxy-aware HttpClient (برای شرکت‌ها)
+            // Proxy-aware HttpClient (für Unternehmensnetzwerke/Proxy/PAC)
             _http = CreateProxyAwareHttpClient(_cfg.RequestTimeoutSeconds);
 
             try
             {
+                // WebView2 initialisieren
                 await Browser.EnsureCoreWebView2Async();
             }
             catch (Exception ex)
             {
-                Log("EnsureCoreWebView2Async FAILED: " + ex);
-                ShowOverlay("WebView2 Runtime fehlt یا مشکل دارد.");
+                Log("EnsureCoreWebView2Async FEHLER: " + ex);
+                ShowOverlay("WebView2 Runtime fehlt oder ist fehlerhaft.");
                 return;
             }
 
-            // WebView2 Settings: native-like
+            // WebView2 Einstellungen (mehr „Desktop-App“-Feeling)
             try
             {
                 var s = Browser.CoreWebView2.Settings;
@@ -107,14 +111,14 @@ namespace WebAppDesktopLauncher
             }
             catch { }
 
-            // Optional: color scheme (اگر SDK پشتیبانی کند)
+            // Optional: Farbschema (wenn vom SDK unterstützt)
             try
             {
                 Browser.CoreWebView2.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Auto;
             }
             catch { }
 
-            // Basic Auth auto answer (اگر ست شد)
+            // Optional: HTTP Basic Auth automatisch beantworten (falls konfiguriert)
             Browser.CoreWebView2.BasicAuthenticationRequested += (_, eArgs) =>
             {
                 try
@@ -126,40 +130,72 @@ namespace WebAppDesktopLauncher
                         eArgs.Response.Password = _cfg.BasicAuthPassword;
                     }
                 }
-                catch { }
+                catch
+                {
+                    // Falls etwas schiefgeht: Standarddialog zulassen
+                }
             };
 
-            // Downloads => Desktop (سازگار با نسخه‌های قدیمی: بدون SuggestedFileName)
+            // DOWNLOAD: Benutzer soll den Dateinamen eingeben.
+            // Speicherort ist IMMER Desktop. (Kein Ordnerwechsel durch Benutzer)
+            // WICHTIG: Kein SaveFileDialog → robust & zuverlässig.
             Browser.CoreWebView2.DownloadStarting += (_, eArgs) =>
             {
                 try
                 {
+                    // Vorschlag: Dateiname aus dem default ResultFilePath holen (kompatibel auch ohne SuggestedFileName)
+                    var defaultPath = eArgs.ResultFilePath; // z.B. ...\Downloads\report.pdf
+                    var suggestedName = Path.GetFileName(defaultPath);
+
+                    if (string.IsNullOrWhiteSpace(suggestedName))
+                        suggestedName = "download";
+
+                    suggestedName = SanitizeFileName(suggestedName);
+
                     var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
 
-                    // در بعضی نسخه‌ها SuggestedFileName وجود ندارد؛ از ResultFilePath پیش‌فرض نام را می‌گیریم
-                    var defaultPath = eArgs.ResultFilePath; // معمولاً ...\Downloads\file.ext
-                    var fileName = Path.GetFileName(defaultPath);
+                    // Dialog muss im UI-Thread geöffnet werden
+                    Dispatcher.Invoke(() =>
+                    {
+                        var dlg = new FileNameDialog(suggestedName)
+                        {
+                            Owner = this
+                        };
 
-                    if (string.IsNullOrWhiteSpace(fileName))
-                        fileName = "download";
+                        var ok = dlg.ShowDialog() == true;
 
-                    fileName = SanitizeFileName(fileName);
+                        if (!ok)
+                        {
+                            // Benutzer hat abgebrochen → Download abbrechen
+                            eArgs.Cancel = true;
+                            eArgs.Handled = true;
+                            Log("Download vom Benutzer abgebrochen.");
+                            return;
+                        }
 
-                    var target = GetUniquePath(Path.Combine(desktop, fileName));
+                        // Benutzer gibt nur Dateinamen ein, wir setzen den Desktop-Pfad.
+                        var fileNameOnly = SanitizeFileName(dlg.FileNameResult);
 
-                    eArgs.ResultFilePath = target;
-                    eArgs.Handled = true; // بدون دیالوگ Save As
+                        // Falls Benutzer keine Endung eingibt: die vorhandene Endung vom Vorschlag übernehmen
+                        fileNameOnly = EnsureExtension(fileNameOnly, suggestedName);
 
-                    Log("Download redirected to Desktop: " + target);
+                        var target = GetUniquePath(Path.Combine(desktop, fileNameOnly));
+
+                        eArgs.ResultFilePath = target;
+                        eArgs.Handled = true;
+
+                        Log("Download-Ziel (Desktop fix): " + target);
+                    });
                 }
                 catch (Exception ex)
                 {
-                    Log("DownloadStarting FAILED: " + ex.Message);
-                    eArgs.Handled = false; // fallback
+                    Log("DownloadStarting FEHLER: " + ex.Message);
+                    // Fallback: Standardverhalten
+                    eArgs.Handled = false;
                 }
             };
 
-            // Overlay logic: لاگین دیده نشود
+            // Overlay Logik: Login-Seite darf nie sichtbar werden
             Browser.CoreWebView2.NavigationStarting += (_, navArgs) =>
             {
                 try
@@ -171,6 +207,7 @@ namespace WebAppDesktopLauncher
                     }
                     else
                     {
+                        // Wenn Session abläuft und wieder Login kommt: erneut verstecken
                         if (IsLoginUrl(url))
                         {
                             Browser.Visibility = Visibility.Hidden;
@@ -187,11 +224,12 @@ namespace WebAppDesktopLauncher
                 {
                     Log($"NavigationCompleted: IsSuccess={navArgs.IsSuccess}, WebErrorStatus={navArgs.WebErrorStatus}, Url={Browser.Source}");
 
-                    // اگر login بود، پشت پرده auto-login
+                    // Falls Login-Seite: Auto-Login im Hintergrund
                     await AutoLoginIfNeededAsync();
 
                     var url = Browser.Source?.ToString() ?? "";
 
+                    // Sobald wir NICHT mehr auf Login sind, UI freigeben
                     if (navArgs.IsSuccess && !IsLoginUrl(url))
                     {
                         _appShown = true;
@@ -206,11 +244,11 @@ namespace WebAppDesktopLauncher
                 catch { }
             };
 
-            // شروع فرآیند wait/poll
+            // Backend warten + laden
             _ = Task.Run(() => WaitAndLoadAsync(_cts.Token));
         }
 
-        // ========================= Core logic =========================
+        // ========================= Kernlogik =========================
 
         private async Task WaitAndLoadAsync(CancellationToken ct)
         {
@@ -224,7 +262,7 @@ namespace WebAppDesktopLauncher
             {
                 try
                 {
-                    if (_http == null) throw new InvalidOperationException("HttpClient not initialized.");
+                    if (_http == null) throw new InvalidOperationException("HttpClient ist nicht initialisiert.");
 
                     using var req = CreateRequestWithOptionalBasicAuth(appUrl);
                     using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -234,7 +272,7 @@ namespace WebAppDesktopLauncher
                     var code = (int)resp.StatusCode;
                     Log($"Poll OK: {code} {resp.ReasonPhrase}");
 
-                    // همه چیز به جز 5xx یعنی آماده
+                    // Alles außer 5xx gilt als „bereit“
                     if (code < 500)
                     {
                         await Dispatcher.InvokeAsync(() =>
@@ -252,17 +290,17 @@ namespace WebAppDesktopLauncher
                 catch (Exception ex)
                 {
                     consecutiveFailures++;
-                    Log($"Poll FAILED (#{consecutiveFailures}): {ex.GetType().Name}: {ex.Message}");
+                    Log($"Poll FEHLER (#{consecutiveFailures}): {ex.GetType().Name}: {ex.Message}");
 
-                    // اگر HttpClient به خاطر Proxy/Auth fail شد ولی مرورگر باز می‌کند،
-                    // بعد از چند بار مستقیم با WebView2 navigate کن (پشت overlay).
+                    // Unternehmensnetzwerke: HttpClient kann wegen Proxy/Auth scheitern, WebView2 kann aber oft laden.
+                    // Nach ein paar Fehlern einmal direkt mit WebView2 navigieren (Overlay bleibt aktiv).
                     if (!directNavigateFallbackTriggered && consecutiveFailures >= 3)
                     {
                         directNavigateFallbackTriggered = true;
 
                         await Dispatcher.InvokeAsync(() =>
                         {
-                            Log("Direct navigate fallback triggered: " + appUrl);
+                            Log("Direkter Navigate-Fallback: " + appUrl);
                             Browser.CoreWebView2.Navigate(appUrl);
                         });
                     }
@@ -272,8 +310,8 @@ namespace WebAppDesktopLauncher
                 {
                     await Dispatcher.InvokeAsync(() =>
                     {
-                        Log("Timeout reached. Showing error overlay.");
-                        ShowOverlay("Zeitüberschreitung. Bitte prüfen Sie Internet/Proxy.");
+                        Log("Timeout erreicht. Zeige Overlay-Fehler.");
+                        ShowOverlay("Zeitüberschreitung. Bitte Internet/Proxy prüfen.");
                     });
                     return;
                 }
@@ -307,6 +345,7 @@ namespace WebAppDesktopLauncher
                 var userJson = JsonSerializer.Serialize(_cfg.AutoLoginUser);
                 var passJson = JsonSerializer.Serialize(_cfg.AutoLoginPassword);
 
+                // Hinweis: Der Benutzer sieht die Login-Seite nicht, weil Overlay aktiv ist.
                 var js = $@"
 (() => {{
   const USER = {userJson};
@@ -336,7 +375,7 @@ namespace WebAppDesktopLauncher
 ";
                 await Browser.CoreWebView2.ExecuteScriptAsync(js);
 
-                // allow retry later
+                // Optional: erneuter Versuch später möglich
                 _ = Task.Run(async () =>
                 {
                     await Task.Delay(4000);
@@ -345,11 +384,11 @@ namespace WebAppDesktopLauncher
             }
             catch (Exception ex)
             {
-                Log("AutoLoginIfNeededAsync FAILED: " + ex.Message);
+                Log("AutoLogin FEHLER: " + ex.Message);
             }
         }
 
-        // ========================= Helpers =========================
+        // ========================= Hilfsmethoden =========================
 
         private LauncherConfig LoadConfig()
         {
@@ -417,7 +456,7 @@ namespace WebAppDesktopLauncher
             if (string.IsNullOrWhiteSpace(url)) return false;
             url = url.ToLowerInvariant();
 
-            // اگر مسیر لاگین سایتت فرق دارد اینجا اضافه کن
+            // Bei Bedarf anpassen, falls Login-URL anders ist (z.B. /account/login)
             return url.Contains("/login") || url.Contains("/auth") || url.Contains("signin") || url.Contains("sign-in");
         }
 
@@ -439,9 +478,28 @@ namespace WebAppDesktopLauncher
         {
             foreach (var c in Path.GetInvalidFileNameChars())
                 name = name.Replace(c, '_');
-            return name;
+            return name.Trim();
         }
 
+        // Wenn Benutzer keine Endung eintippt: Endung vom Vorschlag übernehmen.
+        private static string EnsureExtension(string fileNameOnly, string suggestedName)
+        {
+            try
+            {
+                var ext = Path.GetExtension(fileNameOnly);
+                if (!string.IsNullOrWhiteSpace(ext))
+                    return fileNameOnly;
+
+                var suggestedExt = Path.GetExtension(suggestedName);
+                if (!string.IsNullOrWhiteSpace(suggestedExt))
+                    return fileNameOnly + suggestedExt;
+            }
+            catch { }
+
+            return fileNameOnly;
+        }
+
+        // Falls Datei bereits existiert, eindeutigen Namen erzeugen.
         private static string GetUniquePath(string path)
         {
             if (!File.Exists(path)) return path;
@@ -450,7 +508,7 @@ namespace WebAppDesktopLauncher
             var file = Path.GetFileNameWithoutExtension(path);
             var ext = Path.GetExtension(path);
 
-            for (int i = 1; i < 10_000; i++)
+            for (int i = 1; i < 10000; i++)
             {
                 var p = Path.Combine(dir, $"{file} ({i}){ext}");
                 if (!File.Exists(p)) return p;
