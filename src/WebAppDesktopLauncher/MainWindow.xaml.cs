@@ -15,10 +15,10 @@ namespace WebAppDesktopLauncher
     {
         private sealed class LauncherConfig
         {
-            public string AppUrl { get; set; } = "https://aikiw.com";
+            public string AppUrl { get; set; } = "https://example.com";
             public int MaxWaitSeconds { get; set; } = 300;
             public int PollSeconds { get; set; } = 4;
-            public int RequestTimeoutSeconds { get; set; } = 5;
+            public int RequestTimeoutSeconds { get; set; } = 8;
 
             public string WindowTitle { get; set; } = "WebApp Desktop Client";
             public int Width { get; set; } = 1200;
@@ -30,20 +30,20 @@ namespace WebAppDesktopLauncher
             public bool DisableContextMenus { get; set; } = true;
             public bool DisableStatusBar { get; set; } = true;
 
-            // Optional: HTTP Basic Auth (z. B. Render Passwortschutz)
+            // Optional: HTTP Basic Auth
             public string BasicAuthUser { get; set; } = "";
             public string BasicAuthPassword { get; set; } = "";
 
-            // Optional: Formular-Login (z. B. https://www.aikiw.com/login)
-            public string AutoLoginUser { get; set; } = "Amir";
-            public string AutoLoginPassword { get; set; } = "Amir";
+            // Optional: Form Login
+            public string AutoLoginUser { get; set; } = "";
+            public string AutoLoginPassword { get; set; } = "";
         }
 
         private LauncherConfig _cfg = new LauncherConfig();
         private bool _loginAttempted = false;
-        private CancellationTokenSource? _cts;
+        private bool _appShown = false;
 
-        // مهم: readonly نباشه تا بتونیم با Proxy Handler بسازیم
+        private CancellationTokenSource? _cts;
         private HttpClient? _http;
 
         // Logging
@@ -64,13 +64,10 @@ namespace WebAppDesktopLauncher
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             _cts = new CancellationTokenSource();
-
             _logFilePath = PrepareLogFile();
             Log("=== Launcher started ===");
 
-            // Konfiguration laden
             _cfg = LoadConfig();
-            Log($"Config: AppUrl={_cfg.AppUrl}, MaxWait={_cfg.MaxWaitSeconds}s, Poll={_cfg.PollSeconds}s, Timeout={_cfg.RequestTimeoutSeconds}s");
 
             Title = _cfg.WindowTitle;
             Width = _cfg.Width;
@@ -78,25 +75,47 @@ namespace WebAppDesktopLauncher
             MinWidth = _cfg.MinWidth;
             MinHeight = _cfg.MinHeight;
 
-            // Proxy-aware HttpClient (برای شبکه‌های شرکتی)
+            // ✅ مهم: تا وقتی اپ آماده نشده، خود WebView رو هم مخفی کن که حتی لحظه‌ای لاگین دیده نشه
+            Browser.Visibility = Visibility.Hidden;
+            ShowOverlay("Bitte warten…");
+
+            // ✅ Proxy-aware HttpClient (برای شرکت‌ها)
             _http = CreateProxyAwareHttpClient(_cfg.RequestTimeoutSeconds);
 
             try
             {
-                // WebView2 initialisieren
                 await Browser.EnsureCoreWebView2Async();
             }
             catch (Exception ex)
             {
                 Log("EnsureCoreWebView2Async FAILED: " + ex);
-                Browser.NavigateToString("<html><body style='font-family:system-ui;padding:20px;'>" +
-                                         "<h2>WebView2 konnte nicht initialisiert werden</h2>" +
-                                         "<p>Bitte installieren/aktualisieren Sie Microsoft Edge WebView2 Runtime.</p>" +
-                                         "</body></html>");
+                ShowOverlay("WebView2 Runtime fehlt یا مشکل دارد.");
                 return;
             }
 
-            // Optional: HTTP Basic Auth automatisch beantworten (falls konfiguriert)
+            // ===== WebView2 Settings: native-like =====
+            try
+            {
+                var s = Browser.CoreWebView2.Settings;
+                s.AreDevToolsEnabled = !_cfg.DisableDevTools;
+                s.AreDefaultContextMenusEnabled = !_cfg.DisableContextMenus;
+                s.IsStatusBarEnabled = !_cfg.DisableStatusBar;
+
+                s.IsZoomControlEnabled = false;
+                s.AreBrowserAcceleratorKeysEnabled = false;
+                s.IsBuiltInErrorPageEnabled = false;
+            }
+            catch { }
+
+            // Optional: Dark/Light (اگر SDK شما داشت)
+            try
+            {
+                // بعضی نسخه‌ها PreferredColorScheme دارن
+                Browser.CoreWebView2.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Auto;
+            }
+            catch { }
+
+            // ===== Basic Auth auto answer (اگر گذاشتی) =====
             Browser.CoreWebView2.BasicAuthenticationRequested += (_, eArgs) =>
             {
                 try
@@ -108,120 +127,170 @@ namespace WebAppDesktopLauncher
                         eArgs.Response.Password = _cfg.BasicAuthPassword;
                     }
                 }
-                catch
+                catch { }
+            };
+
+            // ===== Downloads => Desktop =====
+            Browser.CoreWebView2.DownloadStarting += (_, eArgs) =>
+            {
+                try
                 {
-                    // Falls etwas schiefgeht: Standard-Dialog von WebView2 zulassen
+                    var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+
+                    var suggested = string.IsNullOrWhiteSpace(eArgs.SuggestedFileName)
+                        ? "download"
+                        : SanitizeFileName(eArgs.SuggestedFileName);
+
+                    var target = GetUniquePath(Path.Combine(desktop, suggested));
+
+                    eArgs.ResultFilePath = target;
+                    eArgs.Handled = true; // no SaveAs dialog
+
+                    Log("Download redirected to Desktop: " + target);
+                }
+                catch (Exception ex)
+                {
+                    Log("DownloadStarting FAILED: " + ex.Message);
+                    eArgs.Handled = false; // fallback to default behavior
                 }
             };
 
-            // Falls eine /login Seite angezeigt wird: Zugangsdaten automatisch eintragen
+            // ===== Overlay logic: هیچ وقت لاگین دیده نشه =====
+            Browser.CoreWebView2.NavigationStarting += (_, navArgs) =>
+            {
+                try
+                {
+                    var url = navArgs.Uri ?? "";
+                    if (!_appShown)
+                    {
+                        ShowOverlay(IsLoginUrl(url) ? "Anmeldung wird durchgeführt…" : "Komponenten werden geladen…");
+                    }
+                    else
+                    {
+                        // اگر بعداً سشن پرید و رفت login، دوباره مخفی کن
+                        if (IsLoginUrl(url))
+                        {
+                            Browser.Visibility = Visibility.Hidden;
+                            ShowOverlay("Anmeldung wird durchgeführt…");
+                        }
+                    }
+                }
+                catch { }
+            };
+
             Browser.NavigationCompleted += async (_, navArgs) =>
             {
                 try
                 {
                     Log($"NavigationCompleted: IsSuccess={navArgs.IsSuccess}, WebErrorStatus={navArgs.WebErrorStatus}, Url={Browser.Source}");
+
+                    // اگر رفت /login: سریع auto-login پشت پرده
+                    await AutoLoginIfNeededAsync();
+
+                    var url = Browser.Source?.ToString() ?? "";
+
+                    // وقتی از لاگین رد شدیم و وارد اپ شدیم:
+                    if (navArgs.IsSuccess && !IsLoginUrl(url))
+                    {
+                        _appShown = true;
+                        Browser.Visibility = Visibility.Visible;
+                        HideOverlay();
+                    }
+                    else
+                    {
+                        // هنوز تو login/redirect/error هستیم
+                        ShowOverlay(IsLoginUrl(url) ? "Anmeldung wird durchgeführt…" : "Bitte warten…");
+                    }
                 }
                 catch { }
-
-                await AutoLoginIfNeededAsync();
             };
 
-            // Optional: mehr "native-like"
-            Browser.CoreWebView2.Settings.AreDevToolsEnabled = !_cfg.DisableDevTools;
-            Browser.CoreWebView2.Settings.AreDefaultContextMenusEnabled = !_cfg.DisableContextMenus;
-            Browser.CoreWebView2.Settings.IsStatusBarEnabled = !_cfg.DisableStatusBar;
+            // ✅ از اول overlay رو نشون میدیم؛ لازم نیست loading.html تو WebView نمایش بدی
+            // Browser.NavigateToString(ReadAsset("loading.html"));
 
-            // Ladebildschirm sofort anzeigen
-            Browser.NavigateToString(ReadAsset("loading.html"));
-
-            // Backend warten + laden (im Hintergrund)
+            // Backend wait/poll + load in background
             _ = Task.Run(() => WaitAndLoadAsync(_cts.Token));
         }
 
-        private static HttpClient CreateProxyAwareHttpClient(int timeoutSeconds)
+        // ========================= Core logic =========================
+
+        private async Task WaitAndLoadAsync(CancellationToken ct)
         {
-            // HttpClientHandler در net8 پشت‌صحنه از SocketsHttpHandler استفاده می‌کنه.
-            // این تنظیمات کمک می‌کنن تو شبکه‌های شرکتی (Proxy/PAC/Auth) HttpClient مثل سیستم عمل کنه.
-            var handler = new HttpClientHandler
+            var start = DateTimeOffset.UtcNow;
+            var appUrl = _cfg.AppUrl;
+
+            int consecutiveFailures = 0;
+            bool directNavigateFallbackTriggered = false;
+
+            while (!ct.IsCancellationRequested)
             {
-                UseProxy = true,
-                Proxy = WebRequest.GetSystemWebProxy(),
-                UseDefaultCredentials = true,
-                Credentials = CredentialCache.DefaultCredentials,
-                DefaultProxyCredentials = CredentialCache.DefaultCredentials,
-                PreAuthenticate = true,
-                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
-            };
-
-            var client = new HttpClient(handler, disposeHandler: true)
-            {
-                Timeout = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds))
-            };
-
-            // اختیاری: بعضی شبکه‌ها روی User-Agent حساسن
-            try
-            {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("WebAppDesktopLauncher/1.0");
-            }
-            catch { }
-
-            return client;
-        }
-
-        private LauncherConfig LoadConfig()
-        {
-            try
-            {
-                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                var path = Path.Combine(baseDir, "appsettings.json");
-
-                if (!File.Exists(path))
-                    return new LauncherConfig();
-
-                var json = File.ReadAllText(path);
-                var cfg = JsonSerializer.Deserialize<LauncherConfig>(json, new JsonSerializerOptions
+                try
                 {
-                    PropertyNameCaseInsensitive = true
-                });
+                    if (_http == null) throw new InvalidOperationException("HttpClient not initialized.");
 
-                return cfg ?? new LauncherConfig();
+                    using var req = CreateRequestWithOptionalBasicAuth(appUrl);
+                    using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+
+                    consecutiveFailures = 0;
+
+                    var code = (int)resp.StatusCode;
+                    Log($"Poll OK: {code} {resp.ReasonPhrase}");
+
+                    // همه چیز به جز 5xx یعنی آماده
+                    if (code < 500)
+                    {
+                        await Dispatcher.InvokeAsync(() =>
+                        {
+                            Log("Navigate (ready): " + appUrl);
+                            Browser.CoreWebView2.Navigate(appUrl);
+                        });
+                        return;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    consecutiveFailures++;
+                    Log($"Poll FAILED (#{consecutiveFailures}): {ex.GetType().Name}: {ex.Message}");
+
+                    // ✅ خیلی مهم برای شرکت‌ها:
+                    // اگر HttpClient به خاطر Proxy/Auth fail شد ولی مرورگر باز می‌کنه،
+                    // بعد از چند بار مستقیم با WebView2 navigate کن (پشت overlay).
+                    if (!directNavigateFallbackTriggered && consecutiveFailures >= 3)
+                    {
+                        directNavigateFallbackTriggered = true;
+
+                        await Dispatcher.InvokeAsync(() =>
+                        {
+                            Log("Direct navigate fallback triggered: " + appUrl);
+                            Browser.CoreWebView2.Navigate(appUrl);
+                        });
+                    }
+                }
+
+                if ((DateTimeOffset.UtcNow - start).TotalSeconds > _cfg.MaxWaitSeconds)
+                {
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        Log("Timeout reached. Showing error overlay.");
+                        ShowOverlay("Zeitüberschreitung. Bitte prüfen Sie Internet/Proxy.");
+                        // اگر خواستی: Browser.NavigateToString(ReadAsset("error.html"));
+                    });
+                    return;
+                }
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, _cfg.PollSeconds)), ct);
+                }
+                catch
+                {
+                    return;
+                }
             }
-            catch
-            {
-                // Wenn Konfig kaputt ist: Default nehmen
-                return new LauncherConfig();
-            }
-        }
-
-        private string ReadAsset(string fileName)
-        {
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            var path = Path.Combine(baseDir, "Assets", fileName);
-
-            if (!File.Exists(path))
-            {
-                return "<html lang='de'><body style='font-family:system-ui;background:#020617;color:#e5e7eb;padding:24px;'>"
-                     + "<h2>Datei fehlt</h2>"
-                     + $"<p>Die Datei <b>{fileName}</b> wurde nicht gefunden.</p>"
-                     + "</body></html>";
-            }
-
-            return File.ReadAllText(path);
-        }
-
-        private HttpRequestMessage CreateRequestWithOptionalBasicAuth(string url)
-        {
-            var req = new HttpRequestMessage(HttpMethod.Get, url);
-
-            if (!string.IsNullOrWhiteSpace(_cfg.BasicAuthUser) &&
-                !string.IsNullOrWhiteSpace(_cfg.BasicAuthPassword))
-            {
-                var raw = _cfg.BasicAuthUser + ":" + _cfg.BasicAuthPassword;
-                var token = Convert.ToBase64String(Encoding.UTF8.GetBytes(raw));
-                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", token);
-            }
-
-            return req;
         }
 
         private async Task AutoLoginIfNeededAsync()
@@ -231,9 +300,10 @@ namespace WebAppDesktopLauncher
                 if (_loginAttempted) return;
 
                 var url = Browser.Source?.ToString() ?? "";
-                if (!url.Contains("/login", StringComparison.OrdinalIgnoreCase)) return;
+                if (!IsLoginUrl(url)) return;
 
-                if (string.IsNullOrWhiteSpace(_cfg.AutoLoginUser) || string.IsNullOrWhiteSpace(_cfg.AutoLoginPassword))
+                if (string.IsNullOrWhiteSpace(_cfg.AutoLoginUser) ||
+                    string.IsNullOrWhiteSpace(_cfg.AutoLoginPassword))
                     return;
 
                 _loginAttempted = true;
@@ -270,7 +340,7 @@ namespace WebAppDesktopLauncher
 ";
                 await Browser.CoreWebView2.ExecuteScriptAsync(js);
 
-                // allow retry later if needed
+                // allow retry later
                 _ = Task.Run(async () =>
                 {
                     await Task.Delay(4000);
@@ -283,87 +353,119 @@ namespace WebAppDesktopLauncher
             }
         }
 
-        private async Task WaitAndLoadAsync(CancellationToken ct)
+        // ========================= Helpers =========================
+
+        private LauncherConfig LoadConfig()
         {
-            var start = DateTimeOffset.UtcNow;
-            var appUrl = _cfg.AppUrl;
-
-            int consecutiveFailures = 0;
-            bool directNavigateFallbackTriggered = false;
-
-            while (!ct.IsCancellationRequested)
+            try
             {
-                try
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var path = Path.Combine(baseDir, "appsettings.json");
+
+                if (!File.Exists(path))
+                    return new LauncherConfig();
+
+                var json = File.ReadAllText(path);
+                var cfg = JsonSerializer.Deserialize<LauncherConfig>(json, new JsonSerializerOptions
                 {
-                    if (_http == null) throw new InvalidOperationException("HttpClient not initialized.");
+                    PropertyNameCaseInsensitive = true
+                });
 
-                    using var req = CreateRequestWithOptionalBasicAuth(appUrl);
-                    using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-
-                    consecutiveFailures = 0;
-
-                    // Wie in Python: alles außer 5xx gilt als "bereit"
-                    var code = (int)resp.StatusCode;
-                    Log($"Poll OK: {(int)resp.StatusCode} {resp.ReasonPhrase}");
-
-                    if (code < 500)
-                    {
-                        await Dispatcher.InvokeAsync(() =>
-                        {
-                            Log("Navigate (ready): " + appUrl);
-                            Browser.CoreWebView2.Navigate(appUrl);
-                        });
-
-                        return;
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    consecutiveFailures++;
-                    Log($"Poll FAILED (#{consecutiveFailures}): {ex.GetType().Name}: {ex.Message}");
-
-                    // ✅ فیکس عملی برای شرکت‌ها:
-                    // اگر HttpClient چند بار پشت سرهم fail شد، احتمالاً مشکل Proxy/Auth هست
-                    // ولی WebView2 (مثل مرورگر) می‌تونه لود کنه، پس یکبار مستقیم navigate می‌کنیم.
-                    if (!directNavigateFallbackTriggered && consecutiveFailures >= 3)
-                    {
-                        directNavigateFallbackTriggered = true;
-
-                        await Dispatcher.InvokeAsync(() =>
-                        {
-                            Log("Direct navigate fallback triggered: " + appUrl);
-                            Browser.CoreWebView2.Navigate(appUrl);
-                        });
-
-                        // نکته: اینجا return نمی‌کنیم تا اگر واقعاً سرور آماده نبود،
-                        // همچنان پولینگ ادامه پیدا کنه و وقتی ready شد دوباره navigate بشه.
-                        // (در عمل برای شرکت‌ها معمولاً همین یکبار هم کافیست)
-                    }
-                }
-
-                if ((DateTimeOffset.UtcNow - start).TotalSeconds > _cfg.MaxWaitSeconds)
-                {
-                    await Dispatcher.InvokeAsync(() =>
-                    {
-                        Log("Timeout reached. Showing error.html");
-                        Browser.NavigateToString(ReadAsset("error.html"));
-                    });
-                    return;
-                }
-
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, _cfg.PollSeconds)), ct);
-                }
-                catch
-                {
-                    return;
-                }
+                return cfg ?? new LauncherConfig();
             }
+            catch
+            {
+                return new LauncherConfig();
+            }
+        }
+
+        private HttpRequestMessage CreateRequestWithOptionalBasicAuth(string url)
+        {
+            var req = new HttpRequestMessage(HttpMethod.Get, url);
+
+            if (!string.IsNullOrWhiteSpace(_cfg.BasicAuthUser) &&
+                !string.IsNullOrWhiteSpace(_cfg.BasicAuthPassword))
+            {
+                var raw = _cfg.BasicAuthUser + ":" + _cfg.BasicAuthPassword;
+                var token = Convert.ToBase64String(Encoding.UTF8.GetBytes(raw));
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", token);
+            }
+
+            return req;
+        }
+
+        private static HttpClient CreateProxyAwareHttpClient(int timeoutSeconds)
+        {
+            var handler = new HttpClientHandler
+            {
+                UseProxy = true,
+                Proxy = WebRequest.GetSystemWebProxy(),
+                UseDefaultCredentials = true,
+                Credentials = CredentialCache.DefaultCredentials,
+                DefaultProxyCredentials = CredentialCache.DefaultCredentials,
+                PreAuthenticate = true,
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+            };
+
+            var client = new HttpClient(handler, disposeHandler: true)
+            {
+                Timeout = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds))
+            };
+
+            try
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("WebAppDesktopLauncher/1.0");
+            }
+            catch { }
+
+            return client;
+        }
+
+        private static bool IsLoginUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            url = url.ToLowerInvariant();
+            return url.Contains("/login") || url.Contains("/auth") || url.Contains("signin") || url.Contains("sign-in");
+        }
+
+        private void ShowOverlay(string msg)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                try { OverlayText.Text = msg; } catch { }
+                BlockingOverlay.Visibility = Visibility.Visible;
+            });
+        }
+
+        private void HideOverlay()
+        {
+            Dispatcher.Invoke(() =>
+            {
+                BlockingOverlay.Visibility = Visibility.Collapsed;
+            });
+        }
+
+        private static string SanitizeFileName(string name)
+        {
+            foreach (var c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            return name;
+        }
+
+        private static string GetUniquePath(string path)
+        {
+            if (!File.Exists(path)) return path;
+
+            var dir = Path.GetDirectoryName(path) ?? "";
+            var file = Path.GetFileNameWithoutExtension(path);
+            var ext = Path.GetExtension(path);
+
+            for (int i = 1; i < 10_000; i++)
+            {
+                var p = Path.Combine(dir, $"{file} ({i}){ext}");
+                if (!File.Exists(p)) return p;
+            }
+            return path;
         }
 
         private string PrepareLogFile()
@@ -376,8 +478,6 @@ namespace WebAppDesktopLauncher
                     "Logs"
                 );
                 Directory.CreateDirectory(dir);
-
-                // یک فایل ثابت + ساده (اگر خواستی می‌تونیم تاریخ‌دارش کنیم)
                 return Path.Combine(dir, "launcher.log");
             }
             catch
@@ -391,18 +491,13 @@ namespace WebAppDesktopLauncher
             try
             {
                 if (string.IsNullOrWhiteSpace(_logFilePath)) return;
-
                 var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  {msg}{Environment.NewLine}";
                 lock (_logLock)
                 {
                     File.AppendAllText(_logFilePath, line);
                 }
             }
-            catch
-            {
-                // never crash due to logging
-            }
+            catch { }
         }
     }
 }
-
