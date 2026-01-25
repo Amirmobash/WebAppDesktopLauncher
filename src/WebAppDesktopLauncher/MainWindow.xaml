@@ -1,52 +1,107 @@
 <Window x:Class="WebAppDesktopLauncher.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        mc:Ignorable="d"
         Title="WebApp Desktop Client"
         Width="1200" Height="800"
         MinWidth="800" MinHeight="600"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        Background="#F3F3F3">
 
     <Grid>
-        <!-- WebView -->
-        <wv2:WebView2 x:Name="Browser"/>
 
-        <!-- Blocking overlay (کاربر فقط اینو می‌بینه تا اپ آماده شه) -->
+        <!-- WebView2 -->
+        <wv2:WebView2 x:Name="Browser"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch" />
+
+        <!-- Overlay: تا لاگین/پسورد دیده نشه -->
         <Border x:Name="BlockingOverlay"
-                Background="#F3F3F3"
                 Visibility="Visible"
+                Background="#F3F3F3"
                 Panel.ZIndex="999">
+
             <Grid>
-                <Border Width="520"
+
+                <!-- نوار بالا برای حس اپ -->
+                <Border Height="34"
+                        VerticalAlignment="Top"
+                        Background="#FFFFFF"
+                        BorderBrush="#E3E3E3"
+                        BorderThickness="0,0,0,1">
+                    <Grid Margin="12,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Border Width="12" Height="12"
+                                CornerRadius="6"
+                                Background="#2B579A"
+                                VerticalAlignment="Center"
+                                Margin="0,0,10,0"/>
+
+                        <TextBlock Grid.Column="1"
+                                   Text="Desktop Client"
+                                   VerticalAlignment="Center"
+                                   FontFamily="Segoe UI"
+                                   FontSize="12"
+                                   Foreground="#333"/>
+                    </Grid>
+                </Border>
+
+                <!-- کارت وسط -->
+                <Border Width="560"
                         Padding="22"
                         Background="White"
                         BorderBrush="#D0D0D0"
                         BorderThickness="1"
-                        CornerRadius="10"
+                        CornerRadius="12"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
-                    <StackPanel>
-                        <TextBlock Text="Anwendung wird gestartet"
+
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0"
+                                   Text="Anwendung wird gestartet"
+                                   FontFamily="Segoe UI"
                                    FontSize="18"
                                    FontWeight="SemiBold"
+                                   Foreground="#111"
                                    Margin="0,0,0,6"/>
 
-                        <TextBlock x:Name="OverlayText"
+                        <TextBlock Grid.Row="1"
+                                   x:Name="OverlayText"
                                    Text="Bitte warten…"
-                                   Foreground="#666"
+                                   FontFamily="Segoe UI"
                                    FontSize="12"
+                                   Foreground="#666"
                                    Margin="0,0,0,14"/>
 
-                        <ProgressBar Height="10"
-                                     IsIndeterminate="True"/>
+                        <ProgressBar Grid.Row="2"
+                                     Height="10"
+                                     IsIndeterminate="True"
+                                     Margin="0,0,0,10"/>
 
-                        <TextBlock Text="Dieses Fenster bitte nicht schließen."
-                                   Foreground="#777"
+                        <TextBlock Grid.Row="3"
+                                   Text="Dieses Fenster bitte nicht schließen."
+                                   FontFamily="Segoe UI"
                                    FontSize="11"
-                                   Margin="0,12,0,0"/>
-                    </StackPanel>
+                                   Foreground="#777"/>
+                    </Grid>
                 </Border>
+
             </Grid>
         </Border>
+
     </Grid>
 </Window>
