@@ -1,4 +1,3 @@
-````markdown
 # WebApp Desktop Launcher (Windows) 🖥️🌐
 
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
@@ -191,5 +190,3 @@ Siehe: [LICENSE](LICENSE)
 
 * WPF (.NET)
 * Microsoft WebView2
-
-```
